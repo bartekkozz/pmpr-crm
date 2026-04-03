@@ -8,9 +8,7 @@ import time
 DB_FILE = '/opt/pmpr-crm/data/pmpr_leads.db'
 
 def get_db_connection():
-    # Adding timeout=20 means "if database is busy, wait politely for 20 seconds instead of crashing"
     conn = sqlite3.connect(DB_FILE, timeout=20, check_same_thread=False)
-    # Enable WAL mode for simultaneous reads/writes
     return conn
 
 def init_db():
@@ -83,7 +81,6 @@ if selected_handle and selected_handle != "No leads found":
     
     new_note = st.text_area("Add followers count, replies, or details here:", value=current_note, height=100)
     if st.button("💾 Save Note"):
-        # We open a fresh, quick cursor just for this save to prevent locking
         try:
             cursor = conn.cursor()
             cursor.execute("UPDATE developers SET notes = ? WHERE twitter_handle = ?", (new_note, dev_data['twitter_handle']))
@@ -92,12 +89,30 @@ if selected_handle and selected_handle != "No leads found":
             time.sleep(0.5)
             st.rerun()
         except sqlite3.OperationalError as e:
-            st.error(f"Database is currently updating from the scraper. Try again in 2 seconds. (Error: {e})")
+            st.error(f"Database busy. Try again in 2 seconds.")
 
     st.subheader("Launch History")
     if not dev_tokens.empty:
         display_df = dev_tokens.copy()
         display_df['ath_mcap'] = display_df['ath_mcap'].apply(lambda x: f"${x:,.0f}")
+        
+        # --- Terminal Selector ---
+        terminal = st.radio("🔗 Select Trading Terminal:", 
+                            ["Axiom", "Photon", "BullX", "Dexscreener"], 
+                            horizontal=True)
+        
+        def build_trade_link(ca):
+            if terminal == "Axiom":
+                return f"https://axiom.trade/meme/{ca}?chain=sol"
+            elif terminal == "Photon":
+                return f"https://photon-sol.tinyastro.io/en/lp/{ca}"
+            elif terminal == "BullX":
+                return f"https://neo.bullx.io/terminal?chainId=1399811149&address={ca}"
+            else:
+                return f"https://dexscreener.com/solana/{ca}"
+                
+        display_df['Trade'] = display_df['token_address'].apply(build_trade_link)
+        
         display_df = display_df.rename(columns={
             'token_name': 'Name',
             'ticker': 'Ticker',
@@ -106,7 +121,16 @@ if selected_handle and selected_handle != "No leads found":
             'ath_mcap': 'ATH MC',
             'scraped_at': 'Discovered At'
         })
-        st.dataframe(display_df[['Name', 'Ticker', 'Contract Address', 'Chain', 'ATH MC', 'Discovered At']], width='stretch')
+        
+        st.dataframe(
+            display_df[['Name', 'Ticker', 'Contract Address', 'Trade', 'Chain', 'ATH MC', 'Discovered At']], 
+            column_config={
+                "Trade": st.column_config.LinkColumn("Action", display_text=f"📈 Open in {terminal}")
+            },
+            width='stretch',
+            hide_index=True
+        )
+        
         latest_token_name = dev_tokens.iloc[-1]['token_name']
         highest_ath = f"${dev_tokens['ath_mcap'].max():,.0f}"
     else:
