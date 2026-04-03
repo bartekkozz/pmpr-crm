@@ -96,39 +96,22 @@ if selected_handle and selected_handle != "No leads found":
         display_df = dev_tokens.copy()
         display_df['ath_mcap'] = display_df['ath_mcap'].apply(lambda x: f"${x:,.0f}")
         
-        # --- Terminal Selector ---
-        terminal = st.radio("🔗 Select Trading Terminal:", 
-                            ["Axiom", "Photon", "BullX", "Dexscreener"], 
-                            horizontal=True)
+        terminal = st.radio("🔗 Select Trading Terminal:", ["Axiom", "Photon", "BullX", "Dexscreener"], horizontal=True)
         
         def build_trade_link(ca):
-            if terminal == "Axiom":
-                return f"https://axiom.trade/meme/{ca}?chain=sol"
-            elif terminal == "Photon":
-                return f"https://photon-sol.tinyastro.io/en/lp/{ca}"
-            elif terminal == "BullX":
-                return f"https://neo.bullx.io/terminal?chainId=1399811149&address={ca}"
-            else:
-                return f"https://dexscreener.com/solana/{ca}"
+            if terminal == "Axiom": return f"https://axiom.trade/meme/{ca}?chain=sol"
+            elif terminal == "Photon": return f"https://photon-sol.tinyastro.io/en/lp/{ca}"
+            elif terminal == "BullX": return f"https://neo.bullx.io/terminal?chainId=1399811149&address={ca}"
+            else: return f"https://dexscreener.com/solana/{ca}"
                 
         display_df['Trade'] = display_df['token_address'].apply(build_trade_link)
         
-        display_df = display_df.rename(columns={
-            'token_name': 'Name',
-            'ticker': 'Ticker',
-            'token_address': 'Contract Address',
-            'platform': 'Chain',
-            'ath_mcap': 'ATH MC',
-            'scraped_at': 'Discovered At'
-        })
+        display_df = display_df.rename(columns={'token_name': 'Name', 'ticker': 'Ticker', 'token_address': 'Contract Address', 'platform': 'Chain', 'ath_mcap': 'ATH MC', 'scraped_at': 'Discovered At'})
         
         st.dataframe(
             display_df[['Name', 'Ticker', 'Contract Address', 'Trade', 'Chain', 'ATH MC', 'Discovered At']], 
-            column_config={
-                "Trade": st.column_config.LinkColumn("Action", display_text=f"📈 Open in {terminal}")
-            },
-            width='stretch',
-            hide_index=True
+            column_config={"Trade": st.column_config.LinkColumn("Action", display_text=f"📈 Open in {terminal}")},
+            width='stretch', hide_index=True
         )
         
         latest_token_name = dev_tokens.iloc[-1]['token_name']
@@ -139,13 +122,39 @@ if selected_handle and selected_handle != "No leads found":
         highest_ath = "$0"
 
     st.divider()
+    
+    # --- NEW: TEMPLATE MANAGER ---
     st.subheader("Message Composer")
+    
+    with st.expander("⚙️ Create New Predefined Message"):
+        st.caption("You can use these variables in your message: `{launch_count}`, `{latest_token}`, `{ath_mcap}`")
+        new_template_name = st.text_input("Template Name (e.g., 'The Aggressive Pitch')")
+        new_template_body = st.text_area("Message Body (e.g., 'Yo, {latest_token} looks sick...')", height=100)
+        
+        if st.button("➕ Save New Template"):
+            if new_template_name and new_template_body:
+                cursor = conn.cursor()
+                cursor.execute("INSERT INTO templates (template_name, template_body) VALUES (?, ?)", (new_template_name, new_template_body))
+                conn.commit()
+                st.success(f"Template '{new_template_name}' saved!")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.error("Please fill out both the Name and the Body.")
+    # -----------------------------
+
     df_templates = pd.read_sql_query("SELECT * FROM templates", conn)
     selected_template = st.selectbox("Choose a Pitch Template", df_templates['template_name'].tolist())
     raw_template = df_templates[df_templates['template_name'] == selected_template].iloc[0]['template_body']
     
-    personalized_template = raw_template.format(launch_count=dev_data['total_launches'], latest_token=latest_token_name, ath_mcap=highest_ath)
-    final_message = st.text_area("Edit Message:", value=personalized_template, height=150)
+    # Safely inject variables (in case the user forgets one in their custom template)
+    try:
+        personalized_template = raw_template.format(launch_count=dev_data['total_launches'], latest_token=latest_token_name, ath_mcap=highest_ath)
+    except KeyError:
+        # Fallback if they use a weird variable format
+        personalized_template = raw_template
+        
+    final_message = st.text_area("Edit Message Before Sending:", value=personalized_template, height=150)
     
     if st.button("🚀 Log Contact & Prepare Message", type="primary"):
         cursor = conn.cursor()
